@@ -1,1 +1,1 @@
-# yolo-realtime
+# yolo-detection
