@@ -5,6 +5,8 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 from ultralytics import YOLO
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+import av
 
 # ============================================================================
 # PAGE CONFIG & STYLING
@@ -438,7 +440,31 @@ def create_confidence_html(conf_val: float, max_width: str = "100%"):
     </div>
     """
 
+class YOLOVideoProcessor(VideoProcessorBase):
 
+    def recv(self, frame):
+
+        img = frame.to_ndarray(format="bgr24")
+
+        results = model.predict(
+            img,
+            conf=conf,
+            iou=iou,
+            verbose=False
+        )
+
+        dets = parse_results(results[0])
+
+        annotated = draw_boxes(
+            img,
+            dets,
+            names
+        )
+
+        return av.VideoFrame.from_ndarray(
+            annotated,
+            format="bgr24"
+        )
 # ============================================================================
 # MAIN APP
 # ============================================================================
@@ -672,92 +698,32 @@ if mode == "📸 Upload Foto":
 # ============================================================================
 
 elif mode == "🎥 Realtime Kamera":
+
     st.markdown("""
-    <div class="card" style="text-align: center;">
-        <div style="font-size: 1.1rem; margin-bottom: 1rem;">
-            🎥 Mode kamera memerlukan akses ke webcam Anda
+    <div class="card" style="text-align:center;">
+        <div style="font-size:1.2rem;">
+            🎥 Realtime Face Detection
         </div>
-        <div style="color: var(--text-secondary); font-size: 0.9rem;">
-            Pastikan webcam sudah aktif dan diizinkan mengakses browser
-        </div>
+
+        <br>
+
+        Kamera menggunakan browser sehingga
+        dapat berjalan di Streamlit Cloud.
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        run = st.button("▶️ Mulai", key="start_cam", use_container_width=True)
-    with col2:
-        st.empty()
-    with col3:
-        stop = st.button("⏹️ Stop", disabled=not run, key="stop_cam", use_container_width=True)
+    webrtc_streamer(
+        key="facevision",
 
-    cap = cv2.VideoCapture(0)
+        video_processor_factory=YOLOVideoProcessor,
 
-    if not cap.isOpened():
-        st.error("❌ Tidak dapat mengakses webcam. Pastikan webcam tersedia dan diizinkan.")
-    else:
-        frame_placeholder = st.empty()
-        info_placeholder = st.empty()
-        stats_placeholder = st.empty()
+        media_stream_constraints={
+            "video": True,
+            "audio": False,
+        },
 
-        frame_count = 0
-        skip_frames = 3
-
-        while run and not stop:
-            ret, frame_bgr = cap.read()
-            if not ret:
-                time.sleep(0.02)
-                continue
-
-            frame_count += 1
-            dets = []  # Initialize dets
-
-            # Skip frames untuk performa
-            if frame_count % skip_frames == 0:
-                t0 = time.perf_counter()
-                results = model.predict(frame_bgr, conf=conf, iou=iou, verbose=False)
-                elapsed = (time.perf_counter() - t0) * 1000
-
-                dets = parse_results(results[0])
-                annotated_bgr = draw_boxes(frame_bgr, dets, names)
-            else:
-                annotated_bgr = frame_bgr
-                elapsed = 0
-
-            annotated_rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(annotated_rgb, channels="RGB")
-
-            # Info
-            if dets:
-                mean_conf = float(np.mean([cf for (_c, cf, *_rest) in dets]))
-                info_placeholder.success(
-                    f"✅ **{len(dets)} wajah** · Confidence: **{mean_conf*100:.1f}%** · {elapsed:.1f}ms"
-                )
-                
-                # Stats grid
-                faces_html = '<div class="faces-grid">'
-                for idx, (cls_id, conf, *_) in enumerate(dets):
-                    conf_pct = conf * 100
-                    person_name = names.get(cls_id, f"Unknown {cls_id}")
-                    color = "#10b981" if conf >= 0.75 else "#f59e0b" if conf >= 0.50 else "#ef4444"
-                    faces_html += f"""
-                    <div class="face-card">
-                        <div class="face-number" style="color: {color}; font-size: 1.5rem;">{person_name}</div>
-                        <div class="face-conf-value">{conf_pct:.0f}%</div>
-                    </div>
-                    """
-                faces_html += '</div>'
-                stats_placeholder.markdown(faces_html, unsafe_allow_html=True)
-            else:
-                info_placeholder.info(f"📷 Tidak ada wajah · {elapsed:.1f}ms")
-                stats_placeholder.empty()
-
-            time.sleep(0.01)
-
-        cap.release()
-        st.info("✋ Kamera dihentikan")
-
-st.markdown("---")
+        async_processing=True,
+    )
 st.markdown("""
 <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; margin-top: 2rem;">
     <div>FaceVision AI v2.1 • Powered by YOLOv11 • Multi-Image Support ✨</div>
