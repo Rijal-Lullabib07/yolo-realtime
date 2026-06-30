@@ -7,3 +7,4 @@ numpy>=1.26.0
 Pillow>=10.3.0
 torch>=2.3.0
 torchvision>=0.18.0
+
